@@ -21,6 +21,23 @@ def require_api_auth():
     return None
 
 
+@app.before_request
+def require_json_mutations():
+    if (request.path.startswith('/api/') and request.method in ('POST','PUT','PATCH')
+            and not request.is_json):
+        return jsonify(error='Use application/json for API mutations'), 415
+    return None
+
+def checked_int(value, label, low, high):
+    if isinstance(value, bool) or not (
+        isinstance(value, int) or (isinstance(value, str) and value.isdecimal())
+    ):
+        raise ValueError(label+' must be an integer')
+    number=int(value)
+    if not low<=number<=high:
+        raise ValueError(label+' is outside the supported range')
+    return number
+
 @contextmanager
 def dbconn():
     db=sqlite3.connect(os.getenv('DATABASE_PATH','app.db'));db.row_factory=sqlite3.Row;db.execute('PRAGMA foreign_keys=ON')
@@ -54,22 +71,27 @@ def products():return jsonify(rows('SELECT * FROM products ORDER BY id DESC'))
 def create_product():
     d=request.get_json(force=True)
     if not d.get('sku') or not d.get('name'):raise ValueError('SKU and name required')
-    cost=int(d.get('unit_cost_cents',0))
-    if cost<0:raise ValueError('Cost cannot be negative')
+    cost=checked_int(d.get('unit_cost_cents',0),'Unit cost',0,100000000)
     with dbconn() as db:c=db.execute('INSERT INTO products(sku,name,unit_cost_cents) VALUES(?,?,?)',(d['sku'],d['name'],cost));return jsonify(id=c.lastrowid),201
 @app.get('/api/purchase-orders')
 def orders():return jsonify(rows('SELECT po.*,s.name supplier FROM purchase_orders po JOIN suppliers s ON s.id=po.supplier_id ORDER BY po.id DESC'))
 @app.post('/api/purchase-orders')
 def create_order():
-    d=request.get_json(force=True);lines=d.get('lines',[])
-    if not lines:raise ValueError('At least one line required')
+    d=request.get_json(force=True)
+    if not isinstance(d,dict):raise ValueError('Expected purchase order object')
+    lines=d.get('lines',[])
+    if not isinstance(lines,list) or not 1<=len(lines)<=100:
+        raise ValueError('Purchase order requires 1-100 lines')
+    supplier=checked_int(d.get('supplier_id'),'Supplier ID',1,2147483647)
     parsed=[]
     for line in lines:
-        pid,qty,cost=int(line['product_id']),int(line['quantity']),int(line['unit_cost_cents'])
-        if qty<=0 or cost<0:raise ValueError('Invalid quantity or cost')
+        if not isinstance(line,dict):raise ValueError('Each line must be an object')
+        pid=checked_int(line.get('product_id'),'Product ID',1,2147483647)
+        qty=checked_int(line.get('quantity'),'Quantity',1,100000)
+        cost=checked_int(line.get('unit_cost_cents'),'Unit cost',0,100000000)
         parsed.append((pid,qty,cost))
     with dbconn() as db:
-        c=db.execute('INSERT INTO purchase_orders(supplier_id) VALUES(?)',(int(d['supplier_id']),))
+        c=db.execute('INSERT INTO purchase_orders(supplier_id) VALUES(?)',(supplier,))
         db.executemany('INSERT INTO purchase_lines(order_id,product_id,quantity,unit_cost_cents) VALUES(?,?,?,?)',[(c.lastrowid,*x) for x in parsed])
         return jsonify(id=c.lastrowid),201
 @app.post('/api/purchase-orders/<int:order_id>/receive')
