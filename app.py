@@ -75,6 +75,9 @@ def create_order():
 @app.post('/api/purchase-orders/<int:order_id>/receive')
 def receive(order_id):
     with dbconn() as db:
+        # Serialize the status check with stock updates so concurrent requests
+        # cannot apply the same purchase-order receipt twice.
+        db.execute('BEGIN IMMEDIATE')
         r=db.execute('SELECT status FROM purchase_orders WHERE id=?',(order_id,)).fetchone()
         if not r:return jsonify(error='Order not found'),404
         if r['status']=='received':return jsonify(error='Already received'),409
