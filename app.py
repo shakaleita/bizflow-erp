@@ -24,7 +24,7 @@ def require_api_auth():
 @app.before_request
 def require_json_mutations():
     if (request.path.startswith('/api/') and request.method in ('POST','PUT','PATCH')
-            and not request.is_json):
+            and request.content_length not in (None, 0) and not request.is_json):
         return jsonify(error='Use application/json for API mutations'), 415
     return None
 
