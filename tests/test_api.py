@@ -1,6 +1,18 @@
 import os, tempfile, unittest, importlib, sys
 from pathlib import Path
 class ProcurementTest(unittest.TestCase):
+    def test_transaction_rolls_back_on_failure(self):
+        """An exception must never leave a partially written transaction."""
+        from importlib import import_module
+        db_module = import_module('app')
+        with self.assertRaises(RuntimeError):
+            with db_module.dbconn() as connection:
+                connection.execute("INSERT INTO suppliers(name) VALUES ('Transient Supplier')")
+                raise RuntimeError('simulate failed transaction')
+        with db_module.dbconn() as connection:
+            count = connection.execute("SELECT COUNT(*) FROM suppliers WHERE name LIKE 'Transient%'").fetchone()[0]
+        self.assertEqual(count, 0)
+
     def test_csv_export_endpoint(self):
         response=self.client.get('/api/export/products.csv')
         self.assertEqual(response.status_code,200)
