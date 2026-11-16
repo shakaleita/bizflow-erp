@@ -57,3 +57,13 @@ class ProcurementTest(unittest.TestCase):
         self.assertEqual(statuses.count(409),3)
         products=self.client.get('/api/products').json
         self.assertEqual(next(x['stock'] for x in products if x['id']==p),9)
+
+
+    def test_purchase_order_validation_rejects_partial_and_malformed_inputs(self):
+        r=self.client.post('/api/purchase-orders',data='{"supplier_id":1,"lines":[]}',
+                           content_type='text/plain')
+        self.assertEqual(r.status_code,415)
+        self.assertEqual(self.client.post('/api/purchase-orders',json={'supplier_id':1,'lines':{'id':1}}).status_code,400)
+        self.assertEqual(self.client.post('/api/purchase-orders',json={'supplier_id':1,'lines':[{'product_id':1,'quantity':True,'unit_cost_cents':0}]}).status_code,400)
+        self.assertEqual(self.client.post('/api/purchase-orders',json={'supplier_id':1,'lines':[{'product_id':1,'quantity':1,'unit_cost_cents':10**15}]}).status_code,400)
+        self.assertEqual(self.client.post('/api/products',json={'sku':'ZZ-VAL','name':'Bad','unit_cost_cents':1.9}).status_code,400)
