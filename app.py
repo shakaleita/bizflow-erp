@@ -92,3 +92,18 @@ def insights():
         return jsonify(suppliers=db.execute('SELECT COUNT(*) FROM suppliers').fetchone()[0],products=db.execute('SELECT COUNT(*) FROM products').fetchone()[0],open_orders=db.execute("SELECT COUNT(*) FROM purchase_orders WHERE status != 'received'").fetchone()[0],inventory_value_cents=db.execute('SELECT COALESCE(SUM(stock*unit_cost_cents),0) FROM products').fetchone()[0])
 
 if __name__=='__main__':app.run(debug=os.getenv('FLASK_DEBUG') == '1')
+
+
+@app.get('/api/export/products.csv')
+def export_products_csv():
+    """Download a read-only snapshot of the local demo dataset."""
+    from flask import Response
+    from data_export import serialize_csv
+    with dbconn() as connection:
+        cursor = connection.execute("SELECT id,sku,name,stock,unit_cost_cents FROM products ORDER BY id")
+        columns = [column[0] for column in cursor.description]
+        content = serialize_csv(cursor.fetchall(), columns)
+    response = Response(content, mimetype='text/csv')
+    response.headers['Content-Disposition'] = 'attachment; filename="products.csv"'
+    response.headers['Cache-Control'] = 'no-store'
+    return response
