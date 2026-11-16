@@ -24,8 +24,14 @@ def require_api_auth():
 @contextmanager
 def dbconn():
     db=sqlite3.connect(os.getenv('DATABASE_PATH','app.db'));db.row_factory=sqlite3.Row;db.execute('PRAGMA foreign_keys=ON')
-    try:yield db;db.commit()
-    finally:db.close()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 with dbconn() as db:db.executescript("""CREATE TABLE IF NOT EXISTS suppliers(id INTEGER PRIMARY KEY,name TEXT NOT NULL UNIQUE,email TEXT);CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY,sku TEXT NOT NULL UNIQUE,name TEXT NOT NULL,stock INTEGER NOT NULL DEFAULT 0,unit_cost_cents INTEGER NOT NULL DEFAULT 0);CREATE TABLE IF NOT EXISTS purchase_orders(id INTEGER PRIMARY KEY,supplier_id INTEGER NOT NULL REFERENCES suppliers(id),status TEXT NOT NULL DEFAULT 'ordered',created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS purchase_lines(id INTEGER PRIMARY KEY,order_id INTEGER NOT NULL REFERENCES purchase_orders(id),product_id INTEGER NOT NULL REFERENCES products(id),quantity INTEGER NOT NULL,unit_cost_cents INTEGER NOT NULL);""")
 def rows(sql,args=()):
     with dbconn() as db:return [dict(r) for r in db.execute(sql,args).fetchall()]
@@ -91,7 +97,7 @@ def insights():
     with dbconn() as db:
         return jsonify(suppliers=db.execute('SELECT COUNT(*) FROM suppliers').fetchone()[0],products=db.execute('SELECT COUNT(*) FROM products').fetchone()[0],open_orders=db.execute("SELECT COUNT(*) FROM purchase_orders WHERE status != 'received'").fetchone()[0],inventory_value_cents=db.execute('SELECT COALESCE(SUM(stock*unit_cost_cents),0) FROM products').fetchone()[0])
 
-if __name__=='__main__':app.run(debug=os.getenv('FLASK_DEBUG') == '1')
+
 
 
 @app.get('/api/export/products.csv')
@@ -107,3 +113,5 @@ def export_products_csv():
     response.headers['Content-Disposition'] = 'attachment; filename="products.csv"'
     response.headers['Cache-Control'] = 'no-store'
     return response
+
+if __name__=='__main__':app.run(debug=os.getenv('FLASK_DEBUG') == '1')
