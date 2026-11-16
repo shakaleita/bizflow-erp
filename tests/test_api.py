@@ -39,3 +39,21 @@ class ProcurementTest(unittest.TestCase):
         self.assertEqual(product['stock'],7)
     def test_reject_negative_cost(self):
         self.assertEqual(self.client.post('/api/products',json={'sku':'bad','name':'Bad','unit_cost_cents':-3}).status_code,400)
+
+    def test_parallel_receipt_cannot_double_count_inventory(self):
+        from concurrent.futures import ThreadPoolExecutor
+        import uuid
+        suffix=uuid.uuid4().hex[:9]
+        s=self.client.post('/api/suppliers',json={'name':'Concurrent Supplier '+suffix}).json['id']
+        p=self.client.post('/api/products',json={'sku':'CON-'+suffix,'name':'Stock','unit_cost_cents':100}).json['id']
+        order=self.client.post('/api/purchase-orders',json={'supplier_id':s,'lines':[{'product_id':p,'quantity':9,'unit_cost_cents':100}]}).json['id']
+        def receive_once(_):
+            from app import app
+            with app.test_client() as client:
+                return client.post(f'/api/purchase-orders/{order}/receive').status_code
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            statuses=list(pool.map(receive_once, range(4)))
+        self.assertEqual(statuses.count(200),1)
+        self.assertEqual(statuses.count(409),3)
+        products=self.client.get('/api/products').json
+        self.assertEqual(next(x['stock'] for x in products if x['id']==p),9)
